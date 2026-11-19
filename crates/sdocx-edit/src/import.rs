@@ -6,16 +6,20 @@ use std::sync::Arc;
 
 use sdocx::{PageElement, PageObject, PageObjectContent, StoredObject};
 
+use crate::Error;
 use crate::bin::{identity_hash, rd_str16, rd_u16, rd_u32, rd_u64, sha256};
 use crate::model::*;
-use crate::Error;
 
 /// Reads every entry of the archive, relative to the folder holding `note.note`.
+#[allow(clippy::type_complexity)]
 pub(crate) fn read_entries(bytes: &[u8]) -> Result<Vec<(String, Arc<Vec<u8>>)>, Error> {
-    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| Error::Format(format!("ZIP okunamadı: {e}")))?;
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes))
+        .map_err(|e| Error::Format(format!("ZIP okunamadı: {e}")))?;
     let mut all = Vec::new();
     for i in 0..zip.len() {
-        let mut f = zip.by_index(i).map_err(|e| Error::Format(format!("ZIP girdisi okunamadı: {e}")))?;
+        let mut f = zip
+            .by_index(i)
+            .map_err(|e| Error::Format(format!("ZIP girdisi okunamadı: {e}")))?;
         if f.is_dir() {
             continue;
         }
@@ -26,7 +30,11 @@ pub(crate) fn read_entries(bytes: &[u8]) -> Result<Vec<(String, Arc<Vec<u8>>)>, 
     }
     let root = all
         .iter()
-        .find_map(|(n, _)| n.strip_suffix("note.note").filter(|p| p.is_empty() || p.ends_with('/')).map(str::to_owned))
+        .find_map(|(n, _)| {
+            n.strip_suffix("note.note")
+                .filter(|p| p.is_empty() || p.ends_with('/'))
+                .map(str::to_owned)
+        })
         .unwrap_or_default();
     Ok(all
         .into_iter()
@@ -35,11 +43,17 @@ pub(crate) fn read_entries(bytes: &[u8]) -> Result<Vec<(String, Arc<Vec<u8>>)>, 
 }
 
 fn argb_of(c: Option<sdocx::Color>) -> Argb {
-    c.map(|c| 0xFF00_0000 | (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32).unwrap_or(0xFF00_0000)
+    c.map(|c| 0xFF00_0000 | (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32)
+        .unwrap_or(0xFF00_0000)
 }
 
 fn rect_of(b: &sdocx::BoundingBox) -> Rect {
-    Rect::new(b.x_min as f32, b.y_min as f32, b.x_max as f32, b.y_max as f32)
+    Rect::new(
+        b.x_min as f32,
+        b.y_min as f32,
+        b.x_max as f32,
+        b.y_max as f32,
+    )
 }
 
 fn record_end(o: &StoredObject) -> usize {
@@ -62,7 +76,11 @@ fn raw_object(o: &StoredObject, page: &[u8]) -> Option<RawObject> {
     let bytes = page.get(start..end)?.to_vec();
     let mut hashes = Vec::new();
     collect_hashes(o, &mut hashes);
-    Some(RawObject { bytes: Arc::new(bytes), hashes, object_type: page[start] })
+    Some(RawObject {
+        bytes: Arc::new(bytes),
+        hashes,
+        object_type: page[start],
+    })
 }
 
 fn layer_end(l: &sdocx::StoredLayer) -> usize {
@@ -119,6 +137,7 @@ fn kind_name(t: sdocx::ObjectType) -> String {
 }
 
 /// Parses `media/mediaInfo.dat`, keeping each entry body verbatim.
+#[allow(clippy::type_complexity)]
 fn parse_media_info(data: &[u8]) -> Option<(u32, Vec<(u32, String, Vec<u8>)>)> {
     let version = rd_u32(data, 0)?;
     let count = rd_u16(data, 4)? as usize;
@@ -137,9 +156,17 @@ fn parse_media_info(data: &[u8]) -> Option<(u32, Vec<(u32, String, Vec<u8>)>)> {
 
 pub fn open_bytes(bytes: &[u8]) -> Result<Note, Error> {
     let entries = read_entries(bytes)?;
-    let get = |name: &str| entries.iter().find(|(n, _)| n == name).map(|(_, d)| d.clone());
+    let get = |name: &str| {
+        entries
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, d)| d.clone())
+    };
 
-    let options = sdocx::ParseOptions { retain_page_sources: true, ..Default::default() };
+    let options = sdocx::ParseOptions {
+        retain_page_sources: true,
+        ..Default::default()
+    };
     let parsed = match sdocx::parse_bytes_detailed_with_options(bytes, &options) {
         Ok(p) => p,
         Err(e) => {
@@ -153,15 +180,23 @@ pub fn open_bytes(bytes: &[u8]) -> Result<Note, Error> {
             return Err(Error::Format(format!("Not çözümlenemedi: {e}")));
         }
     };
-    let encrypted = parsed.end_tag.as_ref().and_then(|t| t.encryption_info().ok().flatten()).is_some();
+    let encrypted = parsed
+        .end_tag
+        .as_ref()
+        .and_then(|t| t.encryption_info().ok().flatten())
+        .is_some();
     if encrypted {
         return Err(Error::Encrypted);
     }
 
     let mut warnings = Vec::new();
-    for d in parsed.report.diagnostics.iter().take(20) {
-        warnings.push(format!("{:?}: {}", d.code, d.message));
-    }
+    let diagnostics: Vec<String> = parsed
+        .report
+        .diagnostics
+        .iter()
+        .take(200)
+        .map(|d| format!("{:?}: {}", d.code, d.message))
+        .collect();
 
     let doc = &parsed.document;
     let meta = &doc.metadata;
@@ -175,23 +210,40 @@ pub fn open_bytes(bytes: &[u8]) -> Result<Note, Error> {
         media_info_version = Some(version);
         for (bind_id, name, body) in list {
             let data = get(&format!("media/{name}")).unwrap_or_default();
-            media.push(MediaFile { bind_id, file_name: name, data, raw_entry: Some(body) });
+            media.push(MediaFile {
+                bind_id,
+                file_name: name,
+                data,
+                raw_entry: Some(body),
+            });
         }
     }
-    let media_by_index: HashMap<usize, &sdocx::MediaAsset> = meta.media_assets.iter().enumerate().collect();
-    let media_by_id: HashMap<u32, &sdocx::MediaAsset> =
-        meta.media_assets.iter().filter_map(|m| m.archive_id.map(|id| (id, m))).collect();
+    let media_by_index: HashMap<usize, &sdocx::MediaAsset> =
+        meta.media_assets.iter().enumerate().collect();
+    let media_by_id: HashMap<u32, &sdocx::MediaAsset> = meta
+        .media_assets
+        .iter()
+        .filter_map(|m| m.archive_id.map(|id| (id, m)))
+        .collect();
 
     let manifest_hashes: HashMap<&str, [u8; 32]> = parsed
         .page_manifest
         .iter()
-        .flat_map(|m| m.entries.iter().map(|e| (e.page_id.as_str(), e.integrity_hash)))
+        .flat_map(|m| {
+            m.entries
+                .iter()
+                .map(|e| (e.page_id.as_str(), e.integrity_hash))
+        })
         .collect();
 
     let mut pages = Vec::new();
     let mut unsupported: HashMap<String, usize> = HashMap::new();
     for (page, stored) in doc.pages.iter().zip(parsed.stored_pages.iter()) {
-        let Some(src) = stored.source_bytes.as_ref().map(|b| Arc::new(b.clone())).or_else(|| get(&stored.archive_entry))
+        let Some(src) = stored
+            .source_bytes
+            .as_ref()
+            .map(|b| Arc::new(b.clone()))
+            .or_else(|| get(&stored.archive_entry))
         else {
             warnings.push(format!("Sayfa {} için ham veri bulunamadı.", page.uuid));
             continue;
@@ -199,8 +251,14 @@ pub fn open_bytes(bytes: &[u8]) -> Result<Note, Error> {
         let sp = &stored.page;
         let layers = &sp.layers.layers;
         let current = usize::from(sp.layers.current_layer_index);
-        let layer_ranges: Vec<(usize, usize)> = layers.iter().map(|l| (l.header_offset, layer_end(l))).collect();
-        let page_identity = (sp.header.uuid.clone(), sp.header.modified_time_raw.unwrap_or(0));
+        let layer_ranges: Vec<(usize, usize)> = layers
+            .iter()
+            .map(|l| (l.header_offset, layer_end(l)))
+            .collect();
+        let page_identity = (
+            sp.header.uuid.clone(),
+            sp.header.modified_time_raw.unwrap_or(0),
+        );
 
         // Check that we know how the stored hashes are computed; otherwise
         // the page gets fresh identities when it is rebuilt.
@@ -213,8 +271,14 @@ pub fn open_bytes(bytes: &[u8]) -> Result<Note, Error> {
             buf.extend_from_slice(&identity_hash(id, *t));
             sha256(&buf) == layers[current].integrity_trailer
         });
-        let own_hash = src.get(sp.integrity_offset..sp.integrity_offset + 32).and_then(|s| <[u8; 32]>::try_from(s).ok());
-        let page_hash = manifest_hashes.get(page.uuid.as_str()).copied().or(own_hash).unwrap_or([0; 32]);
+        let own_hash = src
+            .get(sp.integrity_offset..sp.integrity_offset + 32)
+            .and_then(|s| <[u8; 32]>::try_from(s).ok());
+        let page_hash = manifest_hashes
+            .get(page.uuid.as_str())
+            .copied()
+            .or(own_hash)
+            .unwrap_or([0; 32]);
 
         // Decoded objects by their payload offset.
         let mut decoded: HashMap<usize, &PageObject> = HashMap::new();
@@ -226,7 +290,9 @@ pub fn open_bytes(bytes: &[u8]) -> Result<Note, Error> {
 
         let mut elements = Vec::new();
         for so in &layers[current].objects {
-            let Some(raw) = raw_object(so, &src) else { continue };
+            let Some(raw) = raw_object(so, &src) else {
+                continue;
+            };
             let dec = decoded.get(&so.payload_offset).map(|o| o.content.clone());
             let simple = so.children.is_empty();
             let el = match (&dec, simple) {
@@ -241,7 +307,10 @@ pub fn open_bytes(bytes: &[u8]) -> Result<Note, Error> {
                     width: s.pen_width.max(0.5),
                     raw: Some(raw.clone()),
                 })),
-                (Some(PageObjectContent::Element(PageElement::TextBox(t))), true) if t.object_spans.is_empty() => {
+                (Some(PageObjectContent::Element(PageElement::TextBox(t))), true)
+                    if t.object_spans.is_empty()
+                        && t.rotation_degrees.is_none_or(|r| r.abs() < 0.01) =>
+                {
                     Some(Element::Text(TextBox {
                         rect: rect_of(&t.bbox),
                         text: t.text.clone(),
@@ -250,7 +319,10 @@ pub fn open_bytes(bytes: &[u8]) -> Result<Note, Error> {
                         raw: Some(raw.clone()),
                     }))
                 }
-                (Some(PageObjectContent::Element(PageElement::PlacedImage(img))), true) => {
+                (Some(PageObjectContent::Element(PageElement::PlacedImage(img))), true)
+                    if img.rotation_degrees.is_none_or(|r| r.abs() < 0.01)
+                        && img.crop_rect.is_none() =>
+                {
                     let asset = img
                         .media_index
                         .and_then(|i| media_by_index.get(&i).copied())
@@ -265,24 +337,33 @@ pub fn open_bytes(bytes: &[u8]) -> Result<Note, Error> {
                         })
                     })
                 }
-                (Some(PageObjectContent::Element(PageElement::Image { bbox, media_index })), true) => {
-                    media_by_index.get(media_index).map(|a| {
-                        Element::Image(Image {
-                            rect: rect_of(bbox),
-                            data: Arc::new(a.data.clone()),
-                            name: a.name.clone(),
-                            raw: Some(raw.clone()),
-                            source_bind_id: a.archive_id,
-                        })
+                (
+                    Some(PageObjectContent::Element(PageElement::Image { bbox, media_index })),
+                    true,
+                ) => media_by_index.get(media_index).map(|a| {
+                    Element::Image(Image {
+                        rect: rect_of(bbox),
+                        data: Arc::new(a.data.clone()),
+                        name: a.name.clone(),
+                        raw: Some(raw.clone()),
+                        source_bind_id: a.archive_id,
                     })
-                }
+                }),
                 _ => None,
             };
             let el = el.unwrap_or_else(|| {
                 let kind = kind_name(so.object_type);
                 *unsupported.entry(kind.clone()).or_default() += 1;
-                let bounds = so.base_metadata(&src).map(|m| rect_of(&m.bbox)).unwrap_or_default();
-                Element::Opaque(Opaque { bounds, kind, raw: raw.clone(), hidden: dec.is_none() })
+                let bounds = so
+                    .base_metadata(&src)
+                    .map(|m| rect_of(&m.bbox))
+                    .unwrap_or_default();
+                Element::Opaque(Opaque {
+                    bounds,
+                    kind,
+                    raw: raw.clone(),
+                    hidden: dec.is_none(),
+                })
             });
             elements.push(el);
         }
@@ -292,9 +373,10 @@ pub fn open_bytes(bytes: &[u8]) -> Result<Note, Error> {
             .color_argb
             .or_else(|| page.background_color.map(|c| argb_of(Some(c))))
             .unwrap_or(Note::DEFAULT_BACKGROUND);
-        let has_special_background =
-            bg.pdf_paper.as_ref().is_some_and(|p| !p.is_empty()) || bg.template_uri.is_some() || bg.image_id.is_some();
-        if layers.len() > 1 {
+        let has_special_background = bg.pdf_paper.as_ref().is_some_and(|p| !p.is_empty())
+            || bg.template_uri.is_some()
+            || bg.image_id.is_some();
+        if layers.len() > 1 && !warnings.iter().any(|w: &String| w.contains("katman")) {
             warnings.push(format!(
                 "Bir sayfada {} katman var; yalnızca etkin katman düzenlenebilir, diğerleri olduğu gibi korunur.",
                 layers.len()
@@ -323,7 +405,10 @@ pub fn open_bytes(bytes: &[u8]) -> Result<Note, Error> {
     }
 
     if !unsupported.is_empty() {
-        let mut list: Vec<_> = unsupported.into_iter().map(|(k, n)| format!("{n} {k}")).collect();
+        let mut list: Vec<_> = unsupported
+            .into_iter()
+            .map(|(k, n)| format!("{n} {k}"))
+            .collect();
         list.sort();
         warnings.push(format!(
             "Düzenlenemeyen öğeler var ({}). Görünürler ve kaydederken olduğu gibi korunurlar.",
@@ -331,8 +416,16 @@ pub fn open_bytes(bytes: &[u8]) -> Result<Note, Error> {
         ));
     }
 
-    let title = meta.note_title.as_ref().map(|t| t.text.clone()).unwrap_or_default();
-    let body = meta.note_text.as_ref().map(|t| t.text.clone()).unwrap_or_default();
+    let title = meta
+        .note_title
+        .as_ref()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    let body = meta
+        .note_text
+        .as_ref()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
     let source = NoteSource {
         note_bytes: get("note.note"),
         end_tag: get("end_tag.bin"),
@@ -340,14 +433,32 @@ pub fn open_bytes(bytes: &[u8]) -> Result<Note, Error> {
         media_info_version,
         original_title: title.clone(),
         original_body: body.clone(),
-        note_dims: parsed.note.as_ref().map(|n| (n.header.width, n.header.height, n.header.page_vertical_padding)),
+        note_dims: parsed.note.as_ref().map(|n| {
+            (
+                n.header.width,
+                n.header.height,
+                n.header.page_vertical_padding,
+            )
+        }),
         encrypted,
         entries,
     };
     if pages.is_empty() {
-        pages.push(Page::blank(Note::DEFAULT_WIDTH, Note::DEFAULT_HEIGHT, Note::DEFAULT_BACKGROUND));
+        pages.push(Page::blank(
+            Note::DEFAULT_WIDTH,
+            Note::DEFAULT_HEIGHT,
+            Note::DEFAULT_BACKGROUND,
+        ));
     }
-    Ok(Note { title, body, pages, density: meta.document_density(), source: Some(Arc::new(source)), warnings })
+    Ok(Note {
+        title,
+        body,
+        pages,
+        density: meta.document_density(),
+        source: Some(Arc::new(source)),
+        warnings,
+        diagnostics,
+    })
 }
 
 pub fn open(path: impl AsRef<std::path::Path>) -> Result<Note, Error> {

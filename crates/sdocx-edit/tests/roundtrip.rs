@@ -6,13 +6,26 @@ use std::sync::Arc;
 use sdocx_edit::*;
 
 fn fixture(name: &str) -> Vec<u8> {
-    std::fs::read(format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
+    std::fs::read(format!(
+        "{}/tests/fixtures/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap()
 }
 
-const FIXTURES: &[&str] = &["mushroom.sdocx", "raven.sdocx", "flowers.sdocx", "title_strokes.sdocx"];
+const FIXTURES: &[&str] = &[
+    "mushroom.sdocx",
+    "raven.sdocx",
+    "flowers.sdocx",
+    "title_strokes.sdocx",
+];
 
 fn count(note: &Note, f: impl Fn(&Element) -> bool) -> usize {
-    note.pages.iter().flat_map(|p| &p.elements).filter(|e| f(e)).count()
+    note.pages
+        .iter()
+        .flat_map(|p| &p.elements)
+        .filter(|e| f(e))
+        .count()
 }
 
 fn strokes(note: &Note) -> usize {
@@ -82,7 +95,14 @@ fn added_stroke_is_saved_and_read_back() {
     for name in FIXTURES {
         let mut note = open_bytes(&fixture(name)).unwrap();
         let n = strokes(&note);
-        let points: Vec<[f32; 2]> = (0..50).map(|i| [100.0 + i as f32 * 3.3, 200.0 + (i as f32 * 0.3).sin() * 40.0]).collect();
+        let points: Vec<[f32; 2]> = (0..50)
+            .map(|i| {
+                [
+                    100.0 + i as f32 * 3.3,
+                    200.0 + (i as f32 * 0.3).sin() * 40.0,
+                ]
+            })
+            .collect();
         let page = &mut note.pages[0];
         page.elements.push(Element::Stroke(Stroke {
             points: points.clone(),
@@ -96,10 +116,15 @@ fn added_stroke_is_saved_and_read_back() {
         assert_clean(&out);
         let again = open_bytes(&out).unwrap();
         assert_eq!(strokes(&again), n + 1, "{name}");
-        let Some(Element::Stroke(s)) = again.pages[0].elements.last() else { panic!("{name}: stroke missing") };
+        let Some(Element::Stroke(s)) = again.pages[0].elements.last() else {
+            panic!("{name}: stroke missing")
+        };
         assert_eq!(s.points.len(), points.len());
         for (a, b) in s.points.iter().zip(&points) {
-            assert!((a[0] - b[0]).abs() < 0.05 && (a[1] - b[1]).abs() < 0.05, "{a:?} vs {b:?}");
+            assert!(
+                (a[0] - b[0]).abs() < 0.05 && (a[1] - b[1]).abs() < 0.05,
+                "{a:?} vs {b:?}"
+            );
         }
         assert_eq!(s.color & 0x00FF_FFFF, 0x0020_40C0);
         assert!((s.width - 6.0).abs() < 0.01);
@@ -110,11 +135,19 @@ fn added_stroke_is_saved_and_read_back() {
 fn deleting_moving_and_editing_existing_objects() {
     let mut note = open_bytes(&fixture("mushroom.sdocx")).unwrap();
     let total = strokes(&note);
-    // page 1 has strokes and a text box
-    let page = &mut note.pages[1];
-    let idx = page.elements.iter().position(|e| matches!(e, Element::Stroke(_))).unwrap();
+    // page 0 has a stroke and an (unrotated) text box
+    let page = &mut note.pages[0];
+    let idx = page
+        .elements
+        .iter()
+        .position(|e| matches!(e, Element::Stroke(_)))
+        .unwrap();
     page.elements.remove(idx);
-    let t = page.elements.iter_mut().find(|e| matches!(e, Element::Text(_))).unwrap();
+    let t = page
+        .elements
+        .iter_mut()
+        .find(|e| matches!(e, Element::Text(_)))
+        .unwrap();
     if let Element::Text(t) = t {
         t.text = "Merhaba dünya — çğıöşü".into();
         t.raw = None;
@@ -122,7 +155,11 @@ fn deleting_moving_and_editing_existing_objects() {
     page.dirty = true;
     // page 2 has images: move one
     let page = &mut note.pages[2];
-    let img = page.elements.iter_mut().find(|e| matches!(e, Element::Image(_))).unwrap();
+    let img = page
+        .elements
+        .iter_mut()
+        .find(|e| matches!(e, Element::Image(_)))
+        .unwrap();
     let old = img.bounds();
     img.translate(40.0, 25.0);
     page.dirty = true;
@@ -131,7 +168,7 @@ fn deleting_moving_and_editing_existing_objects() {
     assert_clean(&out);
     let again = open_bytes(&out).unwrap();
     assert_eq!(strokes(&again), total - 1);
-    let text = again.pages[1].elements.iter().find_map(|e| match e {
+    let text = again.pages[0].elements.iter().find_map(|e| match e {
         Element::Text(t) => Some(t.text.clone()),
         _ => None,
     });
@@ -139,7 +176,13 @@ fn deleting_moving_and_editing_existing_objects() {
     let moved: Vec<Rect> = again.pages[2]
         .elements
         .iter()
-        .filter_map(|e| if let Element::Image(i) = e { Some(i.rect) } else { None })
+        .filter_map(|e| {
+            if let Element::Image(i) = e {
+                Some(i.rect)
+            } else {
+                None
+            }
+        })
         .collect();
     assert_eq!(moved.len(), 2);
     assert!(moved.iter().any(|r| (r.left - old.left - 40.0).abs() < 0.5 && (r.top - old.top - 25.0).abs() < 0.5));
@@ -196,7 +239,10 @@ fn new_note_from_scratch() {
     }));
 
     let (out, report) = save_bytes(&note).unwrap();
-    assert_eq!(report.pages_new, 3, "two pages plus the trailing blank page");
+    assert_eq!(
+        report.pages_new, 3,
+        "two pages plus the trailing blank page"
+    );
     let r = assert_clean(&out);
     assert_eq!(r.unavailable_hashes, 0, "{:?}", r.diagnostics);
     let again = open_bytes(&out).unwrap();
@@ -204,8 +250,20 @@ fn new_note_from_scratch() {
     assert_eq!(again.body, "Gövde metni");
     assert_eq!(again.pages.len(), 3);
     assert_eq!(strokes(&again), 2);
-    assert_eq!(count(&again, |e| matches!(e, Element::Text(t) if t.text == "Kutu içinde yazı")), 1);
-    let img = again.pages[0].elements.iter().find_map(|e| if let Element::Image(i) = e { Some(i) } else { None });
+    assert_eq!(
+        count(
+            &again,
+            |e| matches!(e, Element::Text(t) if t.text == "Kutu içinde yazı")
+        ),
+        1
+    );
+    let img = again.pages[0].elements.iter().find_map(|e| {
+        if let Element::Image(i) = e {
+            Some(i)
+        } else {
+            None
+        }
+    });
     assert_eq!(img.map(|i| i.data.as_slice()), Some(tiny_png().as_slice()));
 
     // Saving the re-opened file again copies everything.
@@ -236,4 +294,37 @@ fn added_and_removed_pages() {
     let (out, _) = save_bytes(&fewer).unwrap();
     assert_clean(&out);
     assert_eq!(open_bytes(&out).unwrap().pages.len(), note.pages.len() - 1);
+}
+
+#[test]
+fn rotated_text_boxes_stay_untouched() {
+    let note = open_bytes(&fixture("mushroom.sdocx")).unwrap();
+    // "Amanita muscaria" on page 1 is rotated: it must be kept as an opaque object.
+    assert!(
+        note.pages[1]
+            .elements
+            .iter()
+            .any(|e| matches!(e, Element::Opaque(o) if o.raw.object_type == 2))
+    );
+}
+
+#[test]
+fn empty_text_boxes_are_not_written() {
+    let mut note = Note::new();
+    note.pages[0].elements.push(Element::Text(TextBox {
+        rect: Rect::new(10.0, 10.0, 200.0, 100.0),
+        text: "  ".into(),
+        font_size: 10.0,
+        color: 0xFF00_0000,
+        raw: None,
+    }));
+    let (out, _) = save_bytes(&note).unwrap();
+    assert_clean(&out);
+    assert_eq!(
+        count(&open_bytes(&out).unwrap(), |e| matches!(
+            e,
+            Element::Text(_)
+        )),
+        0
+    );
 }

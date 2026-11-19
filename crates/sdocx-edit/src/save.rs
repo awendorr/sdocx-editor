@@ -6,10 +6,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::Error;
 use crate::bin::{identity_hash, now_us, rd_str16, rd_u16, rd_u32, sha256};
 use crate::encode::{self, DEFAULT_NOTE_VERTICAL_PADDING, PAGE_FOOTER};
 use crate::model::*;
-use crate::Error;
 
 /// Result of a save.
 #[derive(Debug, Default)]
@@ -43,9 +43,19 @@ impl MediaTable {
         let clean: String = img
             .name
             .chars()
-            .map(|c| if "<>:\"/\\|?*@".contains(c) || (c as u32) < 32 { '_' } else { c })
+            .map(|c| {
+                if "<>:\"/\\|?*@".contains(c) || (c as u32) < 32 {
+                    '_'
+                } else {
+                    c
+                }
+            })
             .collect();
-        let clean = if clean.contains('.') { clean } else { format!("{clean}.png") };
+        let clean = if clean.contains('.') {
+            clean
+        } else {
+            format!("{clean}.png")
+        };
         let file_name = format!("{id}@{clean}");
         self.entries.push(MediaFile {
             bind_id: id,
@@ -60,7 +70,12 @@ impl MediaTable {
 
 type ObjectBytes = (Vec<u8>, Vec<[u8; 32]>);
 
-fn element_objects(el: &Element, page: &Page, media: &mut MediaTable, now: u64) -> Vec<ObjectBytes> {
+fn element_objects(
+    el: &Element,
+    page: &Page,
+    media: &mut MediaTable,
+    now: u64,
+) -> Vec<ObjectBytes> {
     if let Some(raw) = el.raw() {
         return vec![(raw.bytes.to_vec(), raw.hashes.clone())];
     }
@@ -69,6 +84,7 @@ fn element_objects(el: &Element, page: &Page, media: &mut MediaTable, now: u64) 
             .into_iter()
             .map(|o| (o.bytes, o.hashes))
             .collect(),
+        Element::Text(t) if t.text.trim().is_empty() => Vec::new(),
         Element::Text(t) => {
             let o = encode::encode_text(t, page.width, page.height, now);
             vec![(o.bytes, o.hashes)]
@@ -94,7 +110,9 @@ fn drawn_rect(page: &Page) -> Option<Rect> {
 /// Updates the drawn rectangle and drops stale rendered-page caches in a page's
 /// header/property block. Only edits the block when every field could be walked.
 fn adjust_properties(head: &mut Vec<u8>, drawn: Option<Rect>) {
-    let (Some(prop), Some(mut mask)) = (rd_u32(head, 4), rd_u32(head, 0x0e)) else { return };
+    let (Some(prop), Some(mut mask)) = (rd_u32(head, 4), rd_u32(head, 0x0e)) else {
+        return;
+    };
     let prop = prop as usize;
     let walk = |head: &[u8], mask: u32| -> Option<(Option<(usize, usize)>, usize)> {
         let mut at = prop;
@@ -161,7 +179,11 @@ fn adjust_properties(head: &mut Vec<u8>, drawn: Option<Rect>) {
     }
 }
 
-fn finish_page(mut content: Vec<u8>, layer_hashes: &[[u8; 32]], identity: (&str, u64)) -> (Vec<u8>, [u8; 32]) {
+fn finish_page(
+    mut content: Vec<u8>,
+    layer_hashes: &[[u8; 32]],
+    identity: (&str, u64),
+) -> (Vec<u8>, [u8; 32]) {
     let mut buf = layer_hashes.concat();
     buf.extend_from_slice(&identity_hash(identity.0, identity.1));
     let hash = sha256(&buf);
@@ -170,7 +192,12 @@ fn finish_page(mut content: Vec<u8>, layer_hashes: &[[u8; 32]], identity: (&str,
     (content, hash)
 }
 
-fn rebuild_page(page: &Page, src: &PageSource, media: &mut MediaTable, now: u64) -> (Vec<u8>, [u8; 32]) {
+fn rebuild_page(
+    page: &Page,
+    src: &PageSource,
+    media: &mut MediaTable,
+    now: u64,
+) -> (Vec<u8>, [u8; 32]) {
     let b = &src.bytes;
     let mut head = b[..src.layer_offset].to_vec();
     adjust_properties(&mut head, drawn_rect(page));
@@ -186,13 +213,24 @@ fn rebuild_page(page: &Page, src: &PageSource, media: &mut MediaTable, now: u64)
     for (i, &(start, end)) in src.layer_ranges.iter().enumerate() {
         let abs = out.len();
         if i == src.current_layer {
-            let objects: Vec<ObjectBytes> =
-                page.elements.iter().flat_map(|e| element_objects(e, page, media, now)).collect();
-            let refs: Vec<(&[u8], &[[u8; 32]])> = objects.iter().map(|(b, h)| (b.as_slice(), h.as_slice())).collect();
+            let objects: Vec<ObjectBytes> = page
+                .elements
+                .iter()
+                .flat_map(|e| element_objects(e, page, media, now))
+                .collect();
+            let refs: Vec<(&[u8], &[[u8; 32]])> = objects
+                .iter()
+                .map(|(b, h)| (b.as_slice(), h.as_slice()))
+                .collect();
             let (bytes, hash) = match &src.current_layer_identity {
                 Some((id, t)) => {
                     let header_size = rd_u32(b, start).unwrap_or(0) as usize;
-                    encode::layer_record(Some((&b[start..start + header_size], start)), (id, *t), abs, &refs)
+                    encode::layer_record(
+                        Some((&b[start..start + header_size], start)),
+                        (id, *t),
+                        abs,
+                        &refs,
+                    )
                 }
                 None => encode::layer_record(None, (&crate::bin::samsung_uuid(), now), abs, &refs),
             };
@@ -211,12 +249,26 @@ fn rebuild_page(page: &Page, src: &PageSource, media: &mut MediaTable, now: u64)
 }
 
 fn new_page(page: &Page, media: &mut MediaTable, now: u64) -> (Vec<u8>, [u8; 32]) {
-    let mut out = encode::new_page_header(&page.id, page.width, page.height, page.background, drawn_rect(page), now);
+    let mut out = encode::new_page_header(
+        &page.id,
+        page.width,
+        page.height,
+        page.background,
+        drawn_rect(page),
+        now,
+    );
     out.extend_from_slice(&1u16.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes());
     let abs = out.len();
-    let objects: Vec<ObjectBytes> = page.elements.iter().flat_map(|e| element_objects(e, page, media, now)).collect();
-    let refs: Vec<(&[u8], &[[u8; 32]])> = objects.iter().map(|(b, h)| (b.as_slice(), h.as_slice())).collect();
+    let objects: Vec<ObjectBytes> = page
+        .elements
+        .iter()
+        .flat_map(|e| element_objects(e, page, media, now))
+        .collect();
+    let refs: Vec<(&[u8], &[[u8; 32]])> = objects
+        .iter()
+        .map(|(b, h)| (b.as_slice(), h.as_slice()))
+        .collect();
     let (layer, hash) = encode::layer_record(None, (&crate::bin::samsung_uuid(), now), abs, &refs);
     out.extend(layer);
     finish_page(out, &[hash], (&page.id, now))
@@ -289,16 +341,24 @@ pub fn save_bytes(note: &Note) -> Result<(Vec<u8>, SaveReport), Error> {
         page_files.push((page.id.clone(), bytes, hash));
     }
 
-    let vpad = src.and_then(|s| s.note_dims).map_or(DEFAULT_NOTE_VERTICAL_PADDING, |d| d.2);
-    let width = pages.iter().map(|p| p.width).max().unwrap_or(Note::DEFAULT_WIDTH);
-    let height: u32 = pages.iter().map(|p| p.height).sum::<u32>() + vpad * (pages.len().saturating_sub(1) as u32);
+    let vpad = src
+        .and_then(|s| s.note_dims)
+        .map_or(DEFAULT_NOTE_VERTICAL_PADDING, |d| d.2);
+    let width = pages
+        .iter()
+        .map(|p| p.width)
+        .max()
+        .unwrap_or(Note::DEFAULT_WIDTH);
+    let height: u32 =
+        pages.iter().map(|p| p.height).sum::<u32>() + vpad * (pages.len().saturating_sub(1) as u32);
 
     let note_bytes = match (src, note.text_changed()) {
         (Some(s), false) if s.note_bytes.is_some() => {
             let original = s.note_bytes.as_ref().unwrap();
             match s.note_dims {
                 Some((w, h, _)) if (w, h) != (width, height) => {
-                    patch_note_dims(original, (w, h), (width, height)).unwrap_or_else(|| original.to_vec())
+                    patch_note_dims(original, (w, h), (width, height))
+                        .unwrap_or_else(|| original.to_vec())
                 }
                 _ => original.to_vec(),
             }
@@ -315,14 +375,21 @@ pub fn save_bytes(note: &Note) -> Result<(Vec<u8>, SaveReport), Error> {
     };
     let note_hash: [u8; 32] = note_bytes[note_bytes.len() - 32..].try_into().unwrap();
 
-    let ids: Vec<(String, [u8; 32])> = page_files.iter().map(|(id, _, h)| (id.clone(), *h)).collect();
+    let ids: Vec<(String, [u8; 32])> = page_files
+        .iter()
+        .map(|(id, _, h)| (id.clone(), *h))
+        .collect();
     let page_id_info = encode::page_id_info(&note_hash, &ids);
     let end_tag = src
         .and_then(|s| s.end_tag.as_ref().map(|e| e.to_vec()))
         .unwrap_or_else(|| encode::end_tag(width, height as f32, now));
     let media_info = encode::media_info(
         src.and_then(|s| s.media_info_version).unwrap_or(5304),
-        &media.entries.iter().filter_map(|m| m.raw_entry.clone()).collect::<Vec<_>>(),
+        &media
+            .entries
+            .iter()
+            .filter_map(|m| m.raw_entry.clone())
+            .collect::<Vec<_>>(),
     );
 
     let mut entries: Vec<(String, Vec<u8>)> = vec![("media/mediaInfo.dat".into(), media_info)];
@@ -337,8 +404,10 @@ pub fn save_bytes(note: &Note) -> Result<(Vec<u8>, SaveReport), Error> {
     entries.push(("end_tag.bin".into(), end_tag.clone()));
     if let Some(s) = src {
         for (name, data) in &s.entries {
-            let handled = matches!(name.as_str(), "note.note" | "pageIdInfo.dat" | "end_tag.bin")
-                || (name.ends_with(".page") && !name.contains('/'))
+            let handled = matches!(
+                name.as_str(),
+                "note.note" | "pageIdInfo.dat" | "end_tag.bin"
+            ) || (name.ends_with(".page") && !name.contains('/'))
                 || entries.iter().any(|(n, _)| n == name);
             if !handled {
                 entries.push((name.clone(), data.to_vec()));

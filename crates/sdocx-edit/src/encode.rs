@@ -7,7 +7,9 @@
 
 use crate::bin::{Buf, identity_hash, sha256};
 use crate::model::{Argb, Rect, Stroke, TextBox};
-use crate::templates::{CURRENT_PEN_INFO_TEMPLATE, EMPTY_BODY_OBJECT_TEMPLATE, TITLE_OBJECT_PREFIX};
+use crate::templates::{
+    CURRENT_PEN_INFO_TEMPLATE, EMPTY_BODY_OBJECT_TEMPLATE, TITLE_OBJECT_PREFIX,
+};
 
 pub const PAGE_FOOTER: &[u8] = b"Page for SAMSUNG S-Pen SDK";
 pub const END_TAG_FOOTER: &[u8] = b"Document for S-Pen SDK";
@@ -20,11 +22,14 @@ const DEFAULT_ADVANCED_SETTING: &str = "18;0;100;";
 const TEXT_FIELD_MARGINS: [f32; 4] = [8.0, 4.0, 8.0, 4.0];
 const TITLE_OBJECT_TRAILER: &[u8] = &[0x0f, 0, 0, 0, 0x02, 0, 0, 0, 0, 0, 0x01, 0, 0x02, 0, 0];
 const TEXT_FIELD_SHAPE_BASE_TAIL: &[u8] = &[
-    0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0x13, 0, 0, 0, 0x01, 0, 0x02, 0, 0, 0, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0x0c, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0x13, 0, 0, 0, 0x01, 0, 0x02, 0, 0, 0, 0xff, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0x0c, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
-const TEXT_FIELD_TRAILER_SUBRECORD: &[u8] = &[0x0f, 0, 0, 0, 0x02, 0, 0, 0, 0, 0, 0x01, 0, 0x02, 0, 0];
-const IMAGE_TRAILER_SUBRECORD: &[u8] = &[0x11, 0, 0, 0, 0x03, 0, 0, 0, 0, 0, 0x01, 0, 0x04, 0, 0, 0, 0];
+const TEXT_FIELD_TRAILER_SUBRECORD: &[u8] =
+    &[0x0f, 0, 0, 0, 0x02, 0, 0, 0, 0, 0, 0x01, 0, 0x02, 0, 0];
+const IMAGE_TRAILER_SUBRECORD: &[u8] = &[
+    0x11, 0, 0, 0, 0x03, 0, 0, 0, 0, 0, 0x01, 0, 0x04, 0, 0, 0, 0,
+];
 
 /// One encoded page object: the full record and its integrity trailer.
 pub struct EncodedObject {
@@ -43,20 +48,42 @@ fn object_id_bytes(id: &str) -> [u8; 36] {
 fn finish_object(object_type: u8, id: &str, now: u64, payload: &[u8]) -> EncodedObject {
     let hash = identity_hash(id, now);
     let mut b = Buf::new();
-    b.u8(object_type).u16(0).u32((payload.len() + 32) as u32).bytes(payload).bytes(&hash);
-    EncodedObject { bytes: b.into_inner(), hashes: vec![hash] }
+    b.u8(object_type)
+        .u16(0)
+        .u32((payload.len() + 32) as u32)
+        .bytes(payload)
+        .bytes(&hash);
+    EncodedObject {
+        bytes: b.into_inner(),
+        hashes: vec![hash],
+    }
 }
 
-fn base_record(id: &str, rect: Rect, page_w: u32, page_h: u32, now: u64, fixed_point_dims: bool) -> Vec<u8> {
+fn base_record(
+    id: &str,
+    rect: Rect,
+    page_w: u32,
+    page_h: u32,
+    now: u64,
+    fixed_point_dims: bool,
+) -> Vec<u8> {
     let mut r = Buf::new();
-    r.u32(121).u16(0).u32(105).bytes(&[0x02, 0xbf, 0x01, 0x04, 0x00, 0x60, 0x00, 0x00]).u32(4000).u16(36);
+    r.u32(121)
+        .u16(0)
+        .u32(105)
+        .bytes(&[0x02, 0xbf, 0x01, 0x04, 0x00, 0x60, 0x00, 0x00])
+        .u32(4000)
+        .u16(36);
     r.bytes(&object_id_bytes(id)).u64(now);
     for v in [rect.left, rect.top, rect.right, rect.bottom] {
         r.f64(v as f64);
     }
     r.u32(0);
     if fixed_point_dims {
-        r.u64(now).u32(page_w.max(1) * 256).u32(page_h.max(1) * 256).u8(0);
+        r.u64(now)
+            .u32(page_w.max(1) * 256)
+            .u32(page_h.max(1) * 256)
+            .u8(0);
     } else {
         r.u8(0).u64(now).u32(page_w.max(1)).u32(page_h.max(1));
     }
@@ -83,7 +110,11 @@ fn pack_compact_delta(delta: f32) -> Option<u16> {
 /// Value a packed delta decodes to.
 fn unpack_compact_delta(v: u16) -> f32 {
     let magnitude = ((v >> 5) & 0x3FF) as f32 + (v & 0x1F) as f32 / 32.0;
-    if v & 0x8000 != 0 { -magnitude } else { magnitude }
+    if v & 0x8000 != 0 {
+        -magnitude
+    } else {
+        magnitude
+    }
 }
 
 /// Packs a delta and advances `current` by what a reader will decode, so the
@@ -97,7 +128,9 @@ fn push_delta(b: &mut Buf, target: f32, current: &mut f32, scale: f32) -> Option
 
 fn pack_compact_series(values: &[f32], scale: f32) -> Option<Vec<u8>> {
     let mut b = Buf::new();
-    let Some(&first) = values.first() else { return Some(Vec::new()) };
+    let Some(&first) = values.first() else {
+        return Some(Vec::new());
+    };
     b.f32(first);
     let mut current = first;
     for &v in &values[1..] {
@@ -108,7 +141,9 @@ fn pack_compact_series(values: &[f32], scale: f32) -> Option<Vec<u8>> {
 
 fn pack_compact_timestamps(values: &[i32]) -> Option<Vec<u8>> {
     let mut b = Buf::new();
-    let Some(&first) = values.first() else { return Some(Vec::new()) };
+    let Some(&first) = values.first() else {
+        return Some(Vec::new());
+    };
     b.i32(first);
     let mut current = first;
     for &v in &values[1..] {
@@ -165,7 +200,16 @@ fn encode_stroke_chunk(
 ) -> EncodedObject {
     let id = crate::bin::samsung_uuid();
     let pressures: Vec<f32> = if pressures.len() == points.len() {
-        pressures.iter().map(|p| if p.is_finite() { p.clamp(0.0, 1.0) } else { 0.5 }).collect()
+        pressures
+            .iter()
+            .map(|p| {
+                if p.is_finite() {
+                    p.clamp(0.0, 1.0)
+                } else {
+                    0.5
+                }
+            })
+            .collect()
     } else {
         vec![0.5; points.len()]
     };
@@ -175,19 +219,42 @@ fn encode_stroke_chunk(
     let geometry = compact.unwrap_or_else(|| raw_geometry(points, &pressures, &timestamps));
 
     let mut inner = Buf::new();
-    inner.u8(2).u16(mask1).u8(4).u32(0x258E).u16(points.len() as u16).bytes(&geometry);
+    inner
+        .u8(2)
+        .u16(mask1)
+        .u8(4)
+        .u32(0x258E)
+        .u16(points.len() as u16)
+        .bytes(&geometry);
 
     let pen = width.max(0.5);
     let mut flexible = Buf::new();
-    flexible.u32(1).u32(color).f32(pen).u32(0).f32(pen).u32(1).f32((pen - 2.5).max(0.1));
+    flexible
+        .u32(1)
+        .u32(color)
+        .f32(pen)
+        .u32(0)
+        .f32(pen)
+        .u32(1)
+        .f32((pen - 2.5).max(0.1));
 
     let mut body = Buf::new();
-    body.u32((6 + 4 + inner.len()) as u32).bytes(&inner.0).bytes(&flexible.0);
+    body.u32((6 + 4 + inner.len()) as u32)
+        .bytes(&inner.0)
+        .bytes(&flexible.0);
     let mut stroke_sub = Buf::new();
-    stroke_sub.u32((body.len() + 6) as u32).u16(1).bytes(&body.0);
+    stroke_sub
+        .u32((body.len() + 6) as u32)
+        .u16(1)
+        .bytes(&body.0);
 
     let pad = pen.max(1.0);
-    let mut bounds = Rect { left: f32::MAX, top: f32::MAX, right: f32::MIN, bottom: f32::MIN };
+    let mut bounds = Rect {
+        left: f32::MAX,
+        top: f32::MAX,
+        right: f32::MIN,
+        bottom: f32::MIN,
+    };
     for p in points {
         bounds.left = bounds.left.min(p[0]);
         bounds.top = bounds.top.min(p[1]);
@@ -201,22 +268,51 @@ fn encode_stroke_chunk(
 
 /// Encodes a stroke; strokes longer than Samsung's limit become several objects.
 pub fn encode_stroke(s: &Stroke, page_w: u32, page_h: u32, now: u64) -> Vec<EncodedObject> {
-    let points: Vec<[f32; 2]> = s.points.iter().copied().filter(|p| p[0].is_finite() && p[1].is_finite()).collect();
+    let points: Vec<[f32; 2]> = s
+        .points
+        .iter()
+        .copied()
+        .filter(|p| p[0].is_finite() && p[1].is_finite())
+        .collect();
     let mut out = Vec::new();
     if points.len() < 2 {
         // A single tap: duplicate the point so it is a valid two-point stroke.
         if let Some(&p) = points.first() {
-            out.push(encode_stroke_chunk(&[p, p], &[0.5, 0.5], s.color, s.width, page_w, page_h, now));
+            out.push(encode_stroke_chunk(
+                &[p, p],
+                &[0.5, 0.5],
+                s.color,
+                s.width,
+                page_w,
+                page_h,
+                now,
+            ));
         }
         return out;
     }
-    let pressures = if s.pressures.len() == s.points.len() { s.pressures.clone() } else { Vec::new() };
+    let pressures = if s.pressures.len() == s.points.len() {
+        s.pressures.clone()
+    } else {
+        Vec::new()
+    };
     let mut start = 0;
     while start < points.len() {
         let end = (start + MAX_STROKE_POINTS).min(points.len());
         if end - start >= 2 {
-            let pr = if pressures.is_empty() { &[][..] } else { &pressures[start..end] };
-            out.push(encode_stroke_chunk(&points[start..end], pr, s.color, s.width, page_w, page_h, now));
+            let pr = if pressures.is_empty() {
+                &[][..]
+            } else {
+                &pressures[start..end]
+            };
+            out.push(encode_stroke_chunk(
+                &points[start..end],
+                pr,
+                s.color,
+                s.width,
+                page_w,
+                page_h,
+                now,
+            ));
         }
         start = end;
     }
@@ -242,8 +338,21 @@ fn shape_layout_record(rect: Rect, tail: &[u8]) -> Vec<u8> {
     let mid_x = ((rect.left + rect.right) / 2.0) as f64;
     let mid_y = ((rect.top + rect.bottom) / 2.0) as f64;
     let mut r = Buf::new();
-    r.u32(130).u16(6).u32(91).bytes(&[0x01, 0x00, 0x01, 0x0c]).u32(4);
-    for v in [mid_x, rect.top as f64, rect.right as f64, mid_y, mid_x, rect.bottom as f64, rect.left as f64, mid_y] {
+    r.u32(130)
+        .u16(6)
+        .u32(91)
+        .bytes(&[0x01, 0x00, 0x01, 0x0c])
+        .u32(4);
+    for v in [
+        mid_x,
+        rect.top as f64,
+        rect.right as f64,
+        mid_y,
+        mid_x,
+        rect.bottom as f64,
+        rect.left as f64,
+        mid_y,
+    ] {
         r.f64(v);
     }
     r.bytes(tail);
@@ -299,7 +408,11 @@ pub fn encode_text(t: &TextBox, page_w: u32, page_h: u32, now: u64) -> EncodedOb
     for v in [rect.left, rect.top, rect.right, rect.bottom] {
         body.f64(v as f64);
     }
-    body.u32(0).bytes(&path_block(rect)).u32(common.len() as u32).bytes(&common).u8(2);
+    body.u32(0)
+        .bytes(&path_block(rect))
+        .u32(common.len() as u32)
+        .bytes(&common)
+        .u8(2);
     let mut text_rec = Buf::new();
     text_rec.u32((body.len() + 6) as u32).u16(7).bytes(&body.0);
 
@@ -314,22 +427,52 @@ pub fn encode_text(t: &TextBox, page_w: u32, page_h: u32, now: u64) -> EncodedOb
 pub fn encode_image(rect: Rect, bind_id: u32, page_w: u32, page_h: u32, now: u64) -> EncodedObject {
     let id = crate::bin::samsung_uuid();
     let mut base = Buf::new();
-    base.u32(122).u16(0).u32(105).bytes(&[0x02, 0xbf, 0x01, 0x04, 0x00, 0xe0, 0x00, 0x00]).u32(4000).u16(36);
+    base.u32(122)
+        .u16(0)
+        .u32(105)
+        .bytes(&[0x02, 0xbf, 0x01, 0x04, 0x00, 0xe0, 0x00, 0x00])
+        .u32(4000)
+        .u16(36);
     base.bytes(&object_id_bytes(&id)).u64(now);
     for v in [rect.left, rect.top, rect.right, rect.bottom] {
         base.f64(v as f64);
     }
-    base.u32(0).u64(now).u32(page_w.max(1) * 256).u32(page_h.max(1) * 256).bytes(&[0x00, 0x02]);
+    base.u32(0)
+        .u64(now)
+        .u32(page_w.max(1) * 256)
+        .u32(page_h.max(1) * 256)
+        .bytes(&[0x00, 0x02]);
 
     let mut layout_tail = Buf::new();
-    layout_tail.u32(4).zeros(5).bytes(&[0x13, 0, 0, 0, 0x01, 0, 0x02, 0, 0, 0, 0xff, 0, 0, 0]).zeros(9).u32(12).zeros(12);
+    layout_tail
+        .u32(4)
+        .zeros(5)
+        .bytes(&[0x13, 0, 0, 0, 0x01, 0, 0x02, 0, 0, 0, 0xff, 0, 0, 0])
+        .zeros(9)
+        .u32(12)
+        .zeros(12);
 
     let mut fill = Buf::new();
-    fill.u32(62).u8(2).u8(0).u32(bind_id).zeros(16).zeros(8).f32(100.0).f32(100.0).f32(0.0).u8(0).zeros(16);
+    fill.u32(62)
+        .u8(2)
+        .u8(0)
+        .u32(bind_id)
+        .zeros(16)
+        .zeros(8)
+        .f32(100.0)
+        .f32(100.0)
+        .f32(0.0)
+        .u8(0)
+        .zeros(16);
     fill.u32(page_w.max(1)).u8(2);
 
     let mut shape = Buf::new();
-    shape.u32(203).u16(7).u32(135).bytes(&[0x01, 0x00, 0x04, 0x20, 0x10, 0x00, 0x00]).u32(4);
+    shape
+        .u32(203)
+        .u16(7)
+        .u32(135)
+        .bytes(&[0x01, 0x00, 0x04, 0x20, 0x10, 0x00, 0x00])
+        .u32(4);
     for v in [rect.left, rect.top, rect.right, rect.bottom] {
         shape.f64(v as f64);
     }
@@ -362,7 +505,11 @@ pub fn layer_record(
         None => {
             let mut extra = Buf::new();
             extra.str16(identity.0).u64(identity.1);
-            layer.u32((16 + extra.len()) as u32).u32((abs_offset + 16) as u32).bytes(&[1, 2, 1, 0x18]).u32(0);
+            layer
+                .u32((16 + extra.len()) as u32)
+                .u32((abs_offset + 16) as u32)
+                .bytes(&[1, 2, 1, 0x18])
+                .u32(0);
             layer.bytes(&extra.0);
         }
     }
@@ -381,9 +528,25 @@ pub fn layer_record(
 }
 
 /// Header and property block of a brand-new page (Dietrich layout).
-pub fn new_page_header(id: &str, width: u32, height: u32, background: Argb, drawn: Option<Rect>, now: u64) -> Vec<u8> {
+pub fn new_page_header(
+    id: &str,
+    width: u32,
+    height: u32,
+    background: Argb,
+    drawn: Option<Rect>,
+    now: u64,
+) -> Vec<u8> {
     let mut p = Buf::new();
-    p.zeros(18).u32(0).u32(width).u32(height).u32(0).u32(0).str16(id).u64(now).u32(4000).u32(4000);
+    p.zeros(18)
+        .u32(0)
+        .u32(width)
+        .u32(height)
+        .u32(0)
+        .u32(0)
+        .str16(id)
+        .u64(now)
+        .u32(4000)
+        .u32(4000);
     p.0.resize(0x80, 0);
     if let Some(r) = drawn {
         for v in [r.left, r.top, r.right, r.bottom] {
@@ -463,19 +626,44 @@ fn body_object(body: &str, now: u64) -> Vec<u8> {
 }
 
 /// Builds `note.note` with the given title and body text. Returns bytes and note hash.
-pub fn note_file(title: &str, body: &str, width: u32, height: u32, vpad: u32, now: u64) -> (Vec<u8>, [u8; 32]) {
+pub fn note_file(
+    title: &str,
+    body: &str,
+    width: u32,
+    height: u32,
+    vpad: u32,
+    now: u64,
+) -> (Vec<u8>, [u8; 32]) {
     let title_obj = title_object(title, now);
     let body_obj = body_object(body, now);
     let mut d = Buf::new();
-    d.zeros(4).u8(4).u32(NOTE_HEADER_FLAGS).u8(4).u32(NOTE_PROPERTY_FLAGS).u32(4000).str16("").u32(5);
-    d.u64(now).u64(now).u32(width).u32(height).u32(0).u32(vpad).u32(4000);
+    d.zeros(4)
+        .u8(4)
+        .u32(NOTE_HEADER_FLAGS)
+        .u8(4)
+        .u32(NOTE_PROPERTY_FLAGS)
+        .u32(4000)
+        .str16("")
+        .u32(5);
+    d.u64(now)
+        .u64(now)
+        .u32(width)
+        .u32(height)
+        .u32(0)
+        .u32(vpad)
+        .u32(4000);
     d.u32(title_obj.len() as u32).bytes(&title_obj);
     d.u32(body_obj.len() as u32).bytes(&body_obj);
     let optional = d.len() as u32;
     d.put_u32_at(0, optional);
     d.i32(0).i32(-1).u64(0);
     let mut strings = Buf::new();
-    strings.u16(2).i32(0).str16(DEFAULT_PEN_NAME).i32(1).str16(DEFAULT_ADVANCED_SETTING);
+    strings
+        .u16(2)
+        .i32(0)
+        .str16(DEFAULT_PEN_NAME)
+        .i32(1)
+        .str16(DEFAULT_ADVANCED_SETTING);
     d.u32(strings.len() as u32).bytes(&strings.0);
     d.i32(0).bytes(CURRENT_PEN_INFO_TEMPLATE).i32(2).i32(2);
     let hash = sha256(&d.0);
@@ -494,9 +682,35 @@ pub fn page_id_info(note_hash: &[u8; 32], pages: &[(String, [u8; 32])]) -> Vec<u
 
 pub fn end_tag(width: u32, height: f32, now: u64) -> Vec<u8> {
     let mut p = Buf::new();
-    p.i32(4000).str16("").u64(now).i32(0).str16("").i32(width as i32).f32(height).str16("");
-    p.i32(-1).i32(-1).str16("").i32(4000).u64(now).i32(0).u16(0).u16(0).str16("").i32(0).i32(0);
-    p.u64(now).u64(now / 1000).u64(0).str16("").i32(2).i32(2).i64(-1).i32(0).i32(0).str32("");
+    p.i32(4000)
+        .str16("")
+        .u64(now)
+        .i32(0)
+        .str16("")
+        .i32(width as i32)
+        .f32(height)
+        .str16("");
+    p.i32(-1)
+        .i32(-1)
+        .str16("")
+        .i32(4000)
+        .u64(now)
+        .i32(0)
+        .u16(0)
+        .u16(0)
+        .str16("")
+        .i32(0)
+        .i32(0);
+    p.u64(now)
+        .u64(now / 1000)
+        .u64(0)
+        .str16("")
+        .i32(2)
+        .i32(2)
+        .i64(-1)
+        .i32(0)
+        .i32(0)
+        .str32("");
     p.bytes(END_TAG_FOOTER);
     let mut d = Buf::new();
     d.u16(p.len() as u16).bytes(&p.0);
@@ -506,7 +720,12 @@ pub fn end_tag(width: u32, height: f32, now: u64) -> Vec<u8> {
 /// `mediaInfo.dat` body for a new entry.
 pub fn media_entry(bind_id: u32, file_name: &str, data: &[u8], now: u64) -> Vec<u8> {
     let mut b = Buf::new();
-    b.u32(bind_id).str16(file_name).bytes(crate::bin::hex(&sha256(data)).as_bytes()).u16(1).u64(now).u8(1);
+    b.u32(bind_id)
+        .str16(file_name)
+        .bytes(crate::bin::hex(&sha256(data)).as_bytes())
+        .u16(1)
+        .u64(now)
+        .u8(1);
     b.into_inner()
 }
 
@@ -535,16 +754,47 @@ pub fn write_zip(entries: &[(String, Vec<u8>)], trailing: Option<&[u8]>) -> Vec<
         let crc = crc32fast::hash(data);
         let offset = out.len() as u32;
         let name_b = name.as_bytes();
-        out.u32(0x0403_4B50).u16(20).u16(FLAGS).u16(8).u16(0).u16(DOS_DATE).u32(crc);
-        out.u32(compressed.len() as u32).u32(data.len() as u32).u16(name_b.len() as u16).u16(0);
+        out.u32(0x0403_4B50)
+            .u16(20)
+            .u16(FLAGS)
+            .u16(8)
+            .u16(0)
+            .u16(DOS_DATE)
+            .u32(crc);
+        out.u32(compressed.len() as u32)
+            .u32(data.len() as u32)
+            .u16(name_b.len() as u16)
+            .u16(0);
         out.bytes(name_b).bytes(&compressed);
-        central.u32(0x0201_4B50).u16(20).u16(20).u16(FLAGS).u16(8).u16(0).u16(DOS_DATE).u32(crc);
-        central.u32(compressed.len() as u32).u32(data.len() as u32).u16(name_b.len() as u16);
-        central.u16(0).u16(0).u16(0).u16(0).u32(0).u32(offset).bytes(name_b);
+        central
+            .u32(0x0201_4B50)
+            .u16(20)
+            .u16(20)
+            .u16(FLAGS)
+            .u16(8)
+            .u16(0)
+            .u16(DOS_DATE)
+            .u32(crc);
+        central
+            .u32(compressed.len() as u32)
+            .u32(data.len() as u32)
+            .u16(name_b.len() as u16);
+        central
+            .u16(0)
+            .u16(0)
+            .u16(0)
+            .u16(0)
+            .u32(0)
+            .u32(offset)
+            .bytes(name_b);
     }
     let cd_offset = out.len() as u32;
     out.bytes(&central.0);
-    out.u32(0x0605_4B50).u16(0).u16(0).u16(entries.len() as u16).u16(entries.len() as u16);
+    out.u32(0x0605_4B50)
+        .u16(0)
+        .u16(0)
+        .u16(entries.len() as u16)
+        .u16(entries.len() as u16);
     out.u32(central.len() as u32).u32(cd_offset).u16(0);
     if let Some(t) = trailing {
         out.bytes(t);

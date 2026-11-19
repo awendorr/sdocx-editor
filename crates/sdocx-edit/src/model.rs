@@ -43,7 +43,12 @@ impl Rect {
         }
     }
     pub fn expand(self, d: f32) -> Rect {
-        Rect { left: self.left - d, top: self.top - d, right: self.right + d, bottom: self.bottom + d }
+        Rect {
+            left: self.left - d,
+            top: self.top - d,
+            right: self.right + d,
+            bottom: self.bottom + d,
+        }
     }
     pub fn contains(&self, x: f32, y: f32) -> bool {
         x >= self.left && x <= self.right && y >= self.top && y <= self.bottom
@@ -52,7 +57,12 @@ impl Rect {
         self.left <= o.right && o.left <= self.right && self.top <= o.bottom && o.top <= self.bottom
     }
     pub fn translate(self, dx: f32, dy: f32) -> Rect {
-        Rect { left: self.left + dx, top: self.top + dy, right: self.right + dx, bottom: self.bottom + dy }
+        Rect {
+            left: self.left + dx,
+            top: self.top + dy,
+            right: self.right + dx,
+            bottom: self.bottom + dy,
+        }
     }
 }
 
@@ -80,7 +90,12 @@ pub struct Stroke {
 
 impl Stroke {
     pub fn bounds(&self) -> Rect {
-        let mut r = Rect { left: f32::MAX, top: f32::MAX, right: f32::MIN, bottom: f32::MIN };
+        let mut r = Rect {
+            left: f32::MAX,
+            top: f32::MAX,
+            right: f32::MIN,
+            bottom: f32::MIN,
+        };
         for p in &self.points {
             r.left = r.left.min(p[0]);
             r.top = r.top.min(p[1]);
@@ -262,8 +277,10 @@ pub struct Note {
     /// Samsung text sizes are multiplied by this (page width / 360) to get page units.
     pub density: f32,
     pub source: Option<Arc<NoteSource>>,
-    /// Problems noticed while importing.
+    /// Things the user should know about this note (in Turkish).
     pub warnings: Vec<String>,
+    /// Technical parser diagnostics.
+    pub diagnostics: Vec<String>,
 }
 
 impl Default for Note {
@@ -281,10 +298,15 @@ impl Note {
         Self {
             title: String::new(),
             body: String::new(),
-            pages: vec![Page::blank(Self::DEFAULT_WIDTH, Self::DEFAULT_HEIGHT, Self::DEFAULT_BACKGROUND)],
+            pages: vec![Page::blank(
+                Self::DEFAULT_WIDTH,
+                Self::DEFAULT_HEIGHT,
+                Self::DEFAULT_BACKGROUND,
+            )],
             density: Self::DEFAULT_WIDTH as f32 / 360.0,
             source: None,
             warnings: Vec::new(),
+            diagnostics: Vec::new(),
         }
     }
 

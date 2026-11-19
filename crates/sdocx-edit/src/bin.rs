@@ -130,7 +130,10 @@ pub fn rd_str16(b: &[u8], at: usize) -> Option<(String, usize)> {
     let n = rd_u16(b, at)? as usize;
     let start = at + 2;
     let raw = b.get(start..start + n * 2)?;
-    let units: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let units: Vec<u16> = raw
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
     Some((String::from_utf16_lossy(&units), start + n * 2))
 }
 
