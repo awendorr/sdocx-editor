@@ -2,6 +2,8 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
+mod icons;
+mod theme;
 mod worker;
 
 fn main() -> eframe::Result {

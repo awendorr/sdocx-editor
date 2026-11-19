@@ -12,6 +12,7 @@ Samsung Notes (`.sdocx`) notlarını Samsung Notes olmadan bilgisayarda açıp g
 - **Güvenli kayıt:** açılan bir notu ilk kez kaydederken varsayılan ad `… (düzenlendi).sdocx` olur. Aynı dosyanın üzerine yazarsanız önce `.sdocx.yedek` kopyası alınır.
 - **PDF olarak dışa aktarma** (vektör).
 - **Önizleme modu:** notu tam olarak kaydedileceği hâliyle gösterir.
+- **Sade, modern arayüz:** ortalanmış araç çubuğu; kaleme, vurgulayıcıya ve silgiye ikinci kez tıklayınca açılan kalınlık, saydamlık ve 30 renklik palet; son kullanılan renkler; sayfa üzerinde doğrudan yazı yazma; seçili öğenin üstünde renk/boyut/silme çubuğu; sayfa küçük resimleri; açık ve koyu tema. Resimleri pencereye sürükleyip bırakarak da ekleyebilirsiniz.
 
 ## Sınırlamalar
 
@@ -44,7 +45,10 @@ Linux'ta `libxkbcommon-x11` ve OpenGL gerekir.
 | Ctrl+Z / Ctrl+Y | Geri al / Yinele |
 | V, P, H, E, T | Seç, Kalem, Vurgu, Silgi, Yazı |
 | Del | Seçili öğeyi sil |
-| Ctrl + fare tekerleği | Yakınlaştır / uzaklaştır |
+| Ctrl + fare tekerleği, Ctrl + / Ctrl − | Yakınlaştır / uzaklaştır |
+| Ctrl+0 | Sayfa genişliğine sığdır |
+| Esc | Yazmayı bitir / seçimi kaldır |
+| Seç aracında çift tıklama | Yazı kutusunu düzenle |
 
 ## Proje yapısı
 
