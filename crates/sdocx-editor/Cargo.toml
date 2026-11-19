@@ -1,0 +1,15 @@
+[package]
+name = "sdocx-editor"
+description = "Desktop editor for Samsung Notes .sdocx files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sdocx-edit = { path = "../sdocx-edit" }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "persistence", "wayland", "x11"] }
+egui_extras = { version = "0.37" }
+rfd = "0.18"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+serde = { version = "1", features = ["derive"] }
