@@ -93,6 +93,9 @@ pub struct EditorApp {
     worker: Worker,
     textures: HashMap<String, PageTex>,
     page_versions: HashMap<String, u64>,
+    /// Strokes erased from the rendered underlay whose page texture has not been
+    /// redrawn yet: painted over in the page colour so erasing feels instant.
+    erase_masks: HashMap<String, Vec<(u64, model::Stroke)>>,
     text_version: u64,
     version_counter: u64,
     image_cache: HashMap<usize, egui::TextureHandle>,
@@ -170,6 +173,7 @@ impl EditorApp {
             worker: Worker::new(cc.egui_ctx.clone()),
             textures: HashMap::new(),
             page_versions: HashMap::new(),
+            erase_masks: HashMap::new(),
             text_version: 0,
             version_counter: 0,
             image_cache: HashMap::new(),
@@ -223,6 +227,7 @@ impl EditorApp {
         self.note.title = s.title;
         self.note.body = s.body;
         self.selection = None;
+        self.erase_masks.clear();
         for id in changed {
             self.bump_page(&id);
         }
@@ -273,6 +278,7 @@ impl EditorApp {
         self.textures.clear();
         self.image_cache.clear();
         self.page_versions.clear();
+        self.erase_masks.clear();
         self.text_version += 1;
         self.scroll_to_page = Some(0);
     }
@@ -549,6 +555,12 @@ impl EditorApp {
                     );
                     let tex =
                         ctx.load_texture(format!("page-{id}"), color, egui::TextureOptions::LINEAR);
+                    if let Some(m) = self.erase_masks.get_mut(&id) {
+                        m.retain(|(v, _)| *v > key.page_version);
+                        if m.is_empty() {
+                            self.erase_masks.remove(&id);
+                        }
+                    }
                     self.textures.insert(id, PageTex { tex, key });
                 }
                 Output::Error(e) => {
@@ -1085,6 +1097,22 @@ impl EditorApp {
                         egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
                         Color32::WHITE,
                     );
+                    if let Some(masks) = self.erase_masks.get(&page.id) {
+                        let bg = from_argb(page.background | 0xFF00_0000);
+                        for (v, s) in masks {
+                            if *v <= t.key.page_version {
+                                continue;
+                            }
+                            let pts: Vec<Pos2> =
+                                s.points.iter().map(|p| to_screen(pi, p[0], p[1])).collect();
+                            let w = s.width * PEN_DISPLAY_FACTOR * zoom + 4.0;
+                            if pts.len() == 1 {
+                                painter.circle_filled(pts[0], w / 2.0, bg);
+                            } else {
+                                painter.line(pts, EStroke::new(w, bg));
+                            }
+                        }
+                    }
                 }
                 if pi == self.current_page {
                     painter.rect_stroke(
@@ -1322,11 +1350,22 @@ impl EditorApp {
                             self.push_undo();
                             self.erasing = true;
                         }
+                        let mut erased = Vec::new();
                         for i in hits.into_iter().rev() {
-                            self.note.pages[pi].elements.remove(i);
+                            if let Element::Stroke(s) = self.note.pages[pi].elements.remove(i)
+                                && s.raw.is_some()
+                            {
+                                erased.push(s);
+                            }
                         }
                         self.selection = None;
                         self.page_changed(pi);
+                        if !erased.is_empty() {
+                            let id = self.note.pages[pi].id.clone();
+                            let v = self.page_versions.get(&id).copied().unwrap_or(0);
+                            let masks = self.erase_masks.entry(id).or_default();
+                            masks.extend(erased.into_iter().map(|s| (v, s)));
+                        }
                     }
                 }
                 if response.drag_stopped() || response.clicked() {
