@@ -88,6 +88,8 @@ pub struct Settings {
     pub eraser_radius: f32,
     pub last_dir: Option<PathBuf>,
     pub dark: bool,
+    /// With the dark theme, also show pages dark (display only; files are unchanged).
+    pub dark_pages: bool,
     pub pen_recent: Vec<[u8; 4]>,
     pub highlight_recent: Vec<[u8; 4]>,
 }
@@ -104,6 +106,7 @@ impl Default for Settings {
             eraser_radius: 12.0,
             last_dir: None,
             dark: false,
+            dark_pages: true,
             pen_recent: vec![
                 [32, 32, 34, 255],
                 [30, 136, 229, 255],
@@ -200,6 +203,31 @@ fn c32(c: [u8; 4]) -> Color32 {
 
 fn argb(c: [u8; 4]) -> u32 {
     (c[3] as u32) << 24 | (c[0] as u32) << 16 | (c[1] as u32) << 8 | c[2] as u32
+}
+
+/// Dark page mode: flips lightness (white paper becomes dark, black ink light)
+/// while keeping coloured ink colourful, like the dark mode of tablet note apps.
+pub fn invert_lightness(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
+    let (mx, mn) = (r.max(g).max(b) as i32, r.min(g).min(b) as i32);
+    let l = (mx + mn) / 2;
+    // Map 255 -> 30 (dark paper) and 0 -> 235 (light ink).
+    let inverted = 235 - l * 205 / 255;
+    // Grey ink and paper flip; coloured ink keeps its colour (only kept readable).
+    let chroma = mx - mn;
+    let kept = l.max(125);
+    let target = (inverted * (255 - chroma) + kept * chroma) / 255;
+    let d = target - l;
+    let f = |c: u8| (c as i32 + d).clamp(0, 255) as u8;
+    (f(r), f(g), f(b))
+}
+
+fn ink(on: bool, c: Color32) -> Color32 {
+    if !on {
+        return c;
+    }
+    let [r, g, b, a] = c.to_srgba_unmultiplied();
+    let (r, g, b) = invert_lightness(r, g, b);
+    Color32::from_rgba_unmultiplied(r, g, b, a)
 }
 
 fn from_argb(v: u32) -> Color32 {
@@ -778,6 +806,7 @@ impl EditorApp {
             page_version: self.page_versions.get(&page.id).copied().unwrap_or(0),
             text_version: self.text_version,
             mode_full: self.preview,
+            inverted: self.dark_pages(),
             scale_q,
         }
     }
@@ -875,6 +904,7 @@ impl EditorApp {
                 let key = TexKey {
                     scale_q: 0,
                     mode_full: false,
+                    inverted: self.dark_pages(),
                     text_version: 0,
                     ..self.tex_key(page, 0)
                 };
@@ -977,6 +1007,10 @@ impl EditorApp {
     }
 
     // ---------- UI ----------
+
+    fn dark_pages(&self) -> bool {
+        self.settings.dark && self.settings.dark_pages
+    }
 
     fn pal(&self) -> Palette {
         theme::palette(self.settings.dark)
@@ -1168,6 +1202,9 @@ impl EditorApp {
             self.settings.dark = dark;
             theme::apply(ui.ctx(), dark);
         }
+        ui.add_enabled_ui(self.settings.dark, |ui| {
+            ui.checkbox(&mut self.settings.dark_pages, "Sayfaları da koyu göster");
+        });
         ui.separator();
         if menu_item(ui, "Bu not hakkında", "").clicked() {
             self.show_info = true;
@@ -1257,6 +1294,7 @@ impl EditorApp {
                             } else {
                                 c32(c)
                             };
+                            let shown = ink(self.dark_pages(), shown);
                             if swatch(ui, &pal, shown, c == current, 30.0).clicked() {
                                 self.pick_color(c, false);
                             }
@@ -1343,7 +1381,8 @@ impl EditorApp {
                 for (i, c) in colors.iter().enumerate() {
                     let full = [c[0], c[1], c[2], alpha];
                     let sel = current[..3] == c[..];
-                    if swatch(ui, pal, c32([c[0], c[1], c[2], 255]), sel, 32.0).clicked() {
+                    let shown = ink(self.dark_pages(), c32([c[0], c[1], c[2], 255]));
+                    if swatch(ui, pal, shown, sel, 32.0).clicked() {
                         self.pick_color(full, true);
                     }
                     if i % 6 == 5 {
@@ -1514,6 +1553,7 @@ impl EditorApp {
 
     /// Left drawer with page thumbnails.
     fn pages_drawer(&mut self, ui: &mut egui::Ui) {
+        let inv = self.dark_pages();
         let pal = self.pal();
         ui.add_space(10.0);
         ui.horizontal(|ui| {
@@ -1559,7 +1599,7 @@ impl EditorApp {
                     p.rect_filled(
                         r,
                         CornerRadius::same(4),
-                        from_argb(page.background | 0xFF00_0000),
+                        ink(inv, from_argb(page.background | 0xFF00_0000)),
                     );
                     if let Some(t) = self.thumbs.get(&page.id).or(self.textures.get(&page.id)) {
                         p.image(
@@ -1700,6 +1740,7 @@ impl EditorApp {
     }
 
     fn canvas(&mut self, ui: &mut egui::Ui) {
+        let inv = self.dark_pages();
         let ctx = ui.ctx().clone();
         let pal = self.pal();
         let max_w = self
@@ -1792,7 +1833,7 @@ impl EditorApp {
                 painter.rect_filled(
                     prect,
                     CornerRadius::same(3),
-                    from_argb(page.background | 0xFF00_0000),
+                    ink(inv, from_argb(page.background | 0xFF00_0000)),
                 );
                 if let Some(t) = self.textures.get(&page.id) {
                     painter.image(
@@ -1802,7 +1843,7 @@ impl EditorApp {
                         Color32::WHITE,
                     );
                     if let Some(masks) = self.erase_masks.get(&page.id) {
-                        let bg = from_argb(page.background | 0xFF00_0000);
+                        let bg = ink(inv, from_argb(page.background | 0xFF00_0000));
                         for (v, s) in masks {
                             if *v <= t.key.page_version {
                                 continue;
@@ -1849,7 +1890,7 @@ impl EditorApp {
                         line,
                         EStroke::new(
                             (width * PEN_DISPLAY_FACTOR * zoom).max(0.5),
-                            from_argb(color),
+                            ink(inv, from_argb(color)),
                         ),
                     );
                 }
@@ -2019,6 +2060,7 @@ impl EditorApp {
         zoom: f32,
         pal: &Palette,
     ) {
+        let inv = self.dark_pages();
         let Some((pi, ei)) = self.editing_text else {
             return;
         };
@@ -2031,7 +2073,7 @@ impl EditorApp {
             to_screen(pi, t.rect.left, t.rect.top),
             to_screen(pi, t.rect.right, t.rect.bottom),
         );
-        let bg = from_argb(self.note.pages[pi].background | 0xFF00_0000);
+        let bg = ink(inv, from_argb(self.note.pages[pi].background | 0xFF00_0000));
         let painter = ui.painter();
         painter.rect_filled(r.expand(2.0), CornerRadius::same(4), bg);
         painter.rect_stroke(
@@ -2041,7 +2083,7 @@ impl EditorApp {
             StrokeKind::Outside,
         );
         let size = (t.font_size * self.note.density * zoom).max(4.0);
-        let color = from_argb(t.color | 0xFF00_0000);
+        let color = ink(inv, from_argb(t.color | 0xFF00_0000));
         let pad = Vec2::new(8.0 * zoom, 4.0 * zoom);
         let mut text = t.text.clone();
         let before = self.snapshot_if_needed();
@@ -2313,13 +2355,14 @@ impl EditorApp {
         to_screen: &dyn Fn(f32, f32) -> Pos2,
         zoom: f32,
     ) {
+        let inv = self.dark_pages();
         match el {
             Element::Stroke(s) => {
                 let pts: Vec<Pos2> = s.points.iter().map(|p| to_screen(p[0], p[1])).collect();
                 // The sdocx renderer draws Samsung pen widths at about half their value.
                 let stroke = EStroke::new(
                     (s.width * PEN_DISPLAY_FACTOR * zoom).max(0.5),
-                    from_argb(s.color),
+                    ink(inv, from_argb(s.color)),
                 );
                 if pts.len() == 1 {
                     painter.circle_filled(pts[0], stroke.width / 2.0, stroke.color);
@@ -2344,13 +2387,13 @@ impl EditorApp {
                 let galley = painter.layout(
                     t.text.clone(),
                     FontId::proportional(size),
-                    from_argb(t.color),
+                    ink(inv, from_argb(t.color)),
                     (r.width() - 16.0 * zoom).max(10.0),
                 );
                 painter.with_clip_rect(r).galley(
                     r.min + Vec2::new(8.0 * zoom, 4.0 * zoom),
                     galley,
-                    from_argb(t.color),
+                    ink(inv, from_argb(t.color)),
                 );
             }
             Element::Image(img) => {

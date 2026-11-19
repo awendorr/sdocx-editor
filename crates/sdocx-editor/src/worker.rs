@@ -11,6 +11,7 @@ pub struct TexKey {
     pub page_version: u64,
     pub text_version: u64,
     pub mode_full: bool,
+    pub inverted: bool,
     pub scale_q: u32,
 }
 
@@ -61,7 +62,17 @@ impl Worker {
                                     continue;
                                 };
                                 match raster.rasterize(&svg.svg, job.scale, job.max_side) {
-                                    Ok(image) => {
+                                    Ok(mut image) => {
+                                        if key.inverted {
+                                            for px in image.pixels.chunks_exact_mut(4) {
+                                                let (r, g, b) = crate::app::invert_lightness(
+                                                    px[0], px[1], px[2],
+                                                );
+                                                px[0] = r;
+                                                px[1] = g;
+                                                px[2] = b;
+                                            }
+                                        }
                                         let _ = out_tx.send(Output::Page {
                                             id: id.clone(),
                                             key: *key,

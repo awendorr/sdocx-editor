@@ -115,7 +115,7 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32, accent: 
             } else {
                 (-90.0, 90.0)
             };
-            pts.extend(arc(m(14.0), 13.5, 4.5, a0, a1).into_iter());
+            pts.extend(arc(m(14.0), 13.5, 4.5, a0, a1));
             pts.push((m(8.0), 18.0));
             line(&pts);
             line(&[(m(9.5), 5.5), (m(6.0), 9.0), (m(9.5), 12.5)]);
